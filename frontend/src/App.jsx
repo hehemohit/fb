@@ -110,6 +110,14 @@ function Composer({ pageId }) {
   const scheduledUnix = scheduledAt ? Math.floor(new Date(scheduledAt).getTime() / 1000) : undefined
 
   const postText = async () => {
+    if (scheduledAt) {
+      const s = Math.floor(new Date(scheduledAt).getTime() / 1000)
+      const now = Math.floor(Date.now() / 1000)
+      if (s < now + 600 || s > now + 75 * 24 * 3600) {
+        alert('Schedule must be at least 10 minutes from now and within 75 days.')
+        return
+      }
+    }
     const res = await fetch(`${API_BASE}/api/post/text`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -121,6 +129,14 @@ function Composer({ pageId }) {
   }
 
   const postPhoto = async () => {
+    if (scheduledAt) {
+      const s = Math.floor(new Date(scheduledAt).getTime() / 1000)
+      const now = Math.floor(Date.now() / 1000)
+      if (s < now + 600 || s > now + 75 * 24 * 3600) {
+        alert('Schedule must be at least 10 minutes from now and within 75 days.')
+        return
+      }
+    }
     const res = await fetch(`${API_BASE}/api/post/photo`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -159,6 +175,8 @@ function Composer({ pageId }) {
       form.append('file', file)
       form.append('pageId', pageId)
       form.append('message', message)
+      if (scheduledUnix) form.append('scheduledPublishTime', String(scheduledUnix))
+      form.append('publishNow', String(publishNow))
       const res = await fetch(`${API_BASE}/api/post/photo-upload`, { method: 'POST', body: form })
       results.push(await res.json())
     }
@@ -298,7 +316,34 @@ function Composer({ pageId }) {
         </div>
       )}
       <div className="fb-row" style={{ justifyContent: 'flex-end' }}>
-        <button className="fb-btn fb-btn-primary" onClick={postUploadedFiles} disabled={!droppedFiles.length}>Upload & Post</button>
+        <button
+          className="fb-btn fb-btn-primary"
+          onClick={async () => {
+            if (droppedFiles.length || imageUrls.length) {
+              // Use combined compose
+              const form = new FormData()
+              form.append('pageId', pageId)
+              form.append('message', message)
+              if (link) form.append('link', link)
+              if (imageUrls.length) form.append('imageUrls', JSON.stringify(imageUrls))
+              if (scheduledUnix) form.append('scheduledPublishTime', String(scheduledUnix))
+              form.append('publishNow', String(publishNow))
+              droppedFiles.forEach((f) => form.append('files', f))
+              const res = await fetch(`${API_BASE}/api/post/compose`, { method: 'POST', body: form })
+              const data = await res.json()
+              setResult(JSON.stringify(data))
+              setDroppedFiles([])
+              setImageUrls([])
+              fetchPosts()
+            } else {
+              // Text/link only
+              postText()
+            }
+          }}
+          disabled={!message && !imageUrls.length && !droppedFiles.length && !link}
+        >
+          Post
+        </button>
       </div>
       {result && (
         <pre className="fb-result">{result}</pre>

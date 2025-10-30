@@ -25,6 +25,19 @@ mongoose
     process.exit(1);
   });
 
+// Validate scheduled publish time (unix seconds) per FB rules
+function validateScheduledUnix(scheduledUnix) {
+  const now = Math.floor(Date.now() / 1000);
+  const min = now + 10 * 60; // 10 minutes ahead
+  const max = now + 75 * 24 * 60 * 60; // ~75 days
+  if (!scheduledUnix) return { ok: false, reason: 'missing' };
+  const n = Number(scheduledUnix);
+  if (!Number.isFinite(n)) return { ok: false, reason: 'nan' };
+  if (n < min) return { ok: false, reason: 'tooSoon', min };
+  if (n > max) return { ok: false, reason: 'tooLate', max };
+  return { ok: true, value: Math.floor(n) };
+}
+
 // Health check
 app.get('/health', (_req, res) => res.json({ ok: true }));
 
@@ -135,8 +148,10 @@ app.post('/api/post/text', async (req, res) => {
     if (link) params.link = link;
     // Scheduling: if scheduledPublishTime provided, create an unpublished scheduled post
     if (scheduledPublishTime) {
+      const chk = validateScheduledUnix(scheduledPublishTime);
+      if (!chk.ok) return res.status(400).json({ error: 'Invalid scheduledPublishTime' });
       params.published = false;
-      params.scheduled_publish_time = Number(scheduledPublishTime);
+      params.scheduled_publish_time = chk.value;
     } else if (publishNow === false) {
       params.published = false;
     }
@@ -170,8 +185,10 @@ app.post('/api/post/photo', async (req, res) => {
     };
     if (altText) params.alt_text_custom = altText;
     if (scheduledPublishTime) {
+      const chk = validateScheduledUnix(scheduledPublishTime);
+      if (!chk.ok) return res.status(400).json({ error: 'Invalid scheduledPublishTime' });
       params.published = false;
-      params.scheduled_publish_time = Number(scheduledPublishTime);
+      params.scheduled_publish_time = chk.value;
     } else if (publishNow === false) {
       params.published = false;
     }
@@ -191,7 +208,7 @@ app.post('/api/post/photo', async (req, res) => {
 // Upload a local image file and post as photo (multipart)
 app.post('/api/post/photo-upload', upload.single('file'), async (req, res) => {
   try {
-    const { pageId, message } = req.body || {};
+    const { pageId, message, scheduledPublishTime, publishNow } = req.body || {};
     const file = req.file;
     if (!pageId || !file) return res.status(400).json({ error: 'Missing pageId or file' });
     const page = await PageToken.findOne({ pageId });
@@ -200,7 +217,17 @@ app.post('/api/post/photo-upload', upload.single('file'), async (req, res) => {
     const form = new FormData();
     form.append('caption', message || '');
     form.append('access_token', page.accessToken);
-    form.append('published', 'true');
+    // Scheduling rules: when provided, post must be unpublished with future unix timestamp
+    if (scheduledPublishTime) {
+      const chk = validateScheduledUnix(scheduledPublishTime);
+      if (!chk.ok) return res.status(400).json({ error: 'Invalid scheduledPublishTime' });
+      form.append('published', 'false');
+      form.append('scheduled_publish_time', String(chk.value));
+    } else if (String(publishNow) === 'false') {
+      form.append('published', 'false');
+    } else {
+      form.append('published', 'true');
+    }
     form.append('source', file.buffer, { filename: file.originalname, contentType: file.mimetype });
 
     const fbResp = await axios.post(`https://graph.facebook.com/v20.0/${pageId}/photos`, form, {
@@ -220,7 +247,7 @@ app.post('/api/post/photo-upload', upload.single('file'), async (req, res) => {
 app.post('/api/post/compose', upload.array('files'), async (req, res) => {
   try {
     const { pageId } = req.body || {};
-    let { message, imageUrls } = req.body || {};
+    let { message, imageUrls, link, scheduledPublishTime, publishNow } = req.body || {};
     const files = req.files || [];
     if (!pageId) return res.status(400).json({ error: 'Missing pageId' });
     const page = await PageToken.findOne({ pageId });
@@ -260,10 +287,21 @@ app.post('/api/post/compose', upload.array('files'), async (req, res) => {
     }
 
     // 3) Create feed post with attached_media
-    const attached_media = mediaIds.map((id) => ({ media_fbid: id }));
-    const fbResp = await axios.post(`https://graph.facebook.com/v20.0/${pageId}/feed`, null, {
-      params: { message: message || '', attached_media, access_token: page.accessToken },
-    });
+    const params = { message: message || '', access_token: page.accessToken };
+    if (mediaIds.length > 0) {
+      params.attached_media = mediaIds.map((id) => ({ media_fbid: id }));
+    } else if (link) {
+      params.link = link;
+    }
+    if (scheduledPublishTime) {
+      const chk = validateScheduledUnix(scheduledPublishTime);
+      if (!chk.ok) return res.status(400).json({ error: 'Invalid scheduledPublishTime' });
+      params.published = false;
+      params.scheduled_publish_time = chk.value;
+    } else if (String(publishNow) === 'false') {
+      params.published = false;
+    }
+    const fbResp = await axios.post(`https://graph.facebook.com/v20.0/${pageId}/feed`, null, { params });
     res.json(fbResp.data);
   } catch (e) {
     const err = e.response?.data || e.message;
@@ -322,8 +360,10 @@ app.post('/api/post/video', async (req, res) => {
       published: Boolean(published),
     };
     if (scheduledPublishTime) {
+      const chk = validateScheduledUnix(scheduledPublishTime);
+      if (!chk.ok) return res.status(400).json({ error: 'Invalid scheduledPublishTime' });
       params.published = false;
-      params.scheduled_publish_time = Number(scheduledPublishTime);
+      params.scheduled_publish_time = chk.value;
     }
     const fbResp = await axios.post(`https://graph.facebook.com/v20.0/${pageId}/videos`, null, { params });
     res.json(fbResp.data);
