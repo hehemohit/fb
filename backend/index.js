@@ -171,6 +171,130 @@ app.post('/api/post/photo', async (req, res) => {
   }
 });
 
+// Instagram: get IG user id linked to a Page
+app.get('/api/ig/account', async (req, res) => {
+  try {
+    const { pageId } = req.query || {};
+    if (!pageId) return res.status(400).json({ error: 'Missing pageId' });
+    const page = await PageToken.findOne({ pageId });
+    if (!page) return res.status(404).json({ error: 'Page not saved' });
+
+    const igResp = await axios.get(`https://graph.facebook.com/v20.0/${pageId}`, {
+      params: {
+        fields: 'instagram_business_account{username,id}',
+        access_token: page.accessToken,
+      },
+    });
+    const ig = igResp.data.instagram_business_account;
+    if (!ig) return res.json({ igUserId: null, username: null });
+    res.json({ igUserId: ig.id, username: ig.username });
+  } catch (e) {
+    const err = e.response?.data || e.message;
+    res.status(400).json({ error: err });
+  }
+});
+
+// Instagram: post a photo (image URL) via container + publish
+app.post('/api/ig/photo', async (req, res) => {
+  try {
+    const { pageId, imageUrl, caption } = req.body || {};
+    if (!pageId || !imageUrl) return res.status(400).json({ error: 'Missing data' });
+    const page = await PageToken.findOne({ pageId });
+    if (!page) return res.status(404).json({ error: 'Page not saved' });
+
+    // find IG user
+    const igResp = await axios.get(`https://graph.facebook.com/v20.0/${pageId}`, {
+      params: {
+        fields: 'instagram_business_account{id}',
+        access_token: page.accessToken,
+      },
+    });
+    const igUserId = igResp.data?.instagram_business_account?.id;
+    if (!igUserId) return res.status(400).json({ error: 'No IG account linked to this Page' });
+
+    // 1) create media container
+    const container = await axios.post(
+      `https://graph.facebook.com/v20.0/${igUserId}/media`,
+      null,
+      {
+        params: {
+          image_url: imageUrl,
+          caption: caption || '',
+          access_token: page.accessToken,
+        },
+      }
+    );
+
+    // 2) publish container
+    const publish = await axios.post(
+      `https://graph.facebook.com/v20.0/${igUserId}/media_publish`,
+      null,
+      {
+        params: {
+          creation_id: container.data.id,
+          access_token: page.accessToken,
+        },
+      }
+    );
+
+    res.json({ creation_id: container.data.id, id: publish.data.id });
+  } catch (e) {
+    const err = e.response?.data || e.message;
+    console.error('IG photo post error:', err);
+    res.status(400).json({ error: err });
+  }
+});
+
+// Instagram: post a video (Reel) via video_url
+app.post('/api/ig/video', async (req, res) => {
+  try {
+    const { pageId, videoUrl, caption, shareToFeed } = req.body || {};
+    if (!pageId || !videoUrl) return res.status(400).json({ error: 'Missing data' });
+    const page = await PageToken.findOne({ pageId });
+    if (!page) return res.status(404).json({ error: 'Page not saved' });
+
+    const igResp = await axios.get(`https://graph.facebook.com/v20.0/${pageId}`, {
+      params: {
+        fields: 'instagram_business_account{id}',
+        access_token: page.accessToken,
+      },
+    });
+    const igUserId = igResp.data?.instagram_business_account?.id;
+    if (!igUserId) return res.status(400).json({ error: 'No IG account linked to this Page' });
+
+    const container = await axios.post(
+      `https://graph.facebook.com/v20.0/${igUserId}/media`,
+      null,
+      {
+        params: {
+          media_type: 'VIDEO',
+          video_url: videoUrl,
+          caption: caption || '',
+          share_to_feed: Boolean(shareToFeed),
+          access_token: page.accessToken,
+        },
+      }
+    );
+
+    const publish = await axios.post(
+      `https://graph.facebook.com/v20.0/${igUserId}/media_publish`,
+      null,
+      {
+        params: {
+          creation_id: container.data.id,
+          access_token: page.accessToken,
+        },
+      }
+    );
+
+    res.json({ creation_id: container.data.id, id: publish.data.id });
+  } catch (e) {
+    const err = e.response?.data || e.message;
+    console.error('IG video post error:', err);
+    res.status(400).json({ error: err });
+  }
+});
+
 // Start server
 const port = process.env.PORT || 4000;
 app.listen(port, () => console.log(`API on :${port}`));

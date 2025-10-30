@@ -8,9 +8,14 @@ function Home() {
     window.location.href = `${API_BASE}/auth/facebook`
   }
   return (
-    <div className="card">
-      <h2>Connect Facebook</h2>
-      <button onClick={handleConnect}>Connect Facebook</button>
+    <div className="fb-shell">
+      <div className="fb-card">
+        <h1 className="fb-title">Connect to Facebook</h1>
+        <p className="fb-sub">Authorize to manage your Page and publish posts.</p>
+        <button className="fb-btn fb-btn-primary" onClick={handleConnect}>
+          Continue with Facebook
+        </button>
+      </div>
     </div>
   )
 }
@@ -64,23 +69,28 @@ function SelectPage() {
     if (res.ok) setSaved(true)
   }
 
-  if (loading) return <p>Loading pages…</p>
-  if (error) return <p style={{ color: 'red' }}>{error}</p>
+  if (loading) return <div className="fb-shell"><div className="fb-card"><p>Loading pages…</p></div></div>
+  if (error) return <div className="fb-shell"><div className="fb-card"><p className="fb-error">{error}</p></div></div>
 
   return (
-    <div className="card">
-      <h2>Select Page</h2>
-      <select value={selected} onChange={(e) => {
-        setSelected(e.target.value)
-        const p = pages.find(pp => pp.id === e.target.value)
-        setPageName(p?.name || '')
-      }}>
-        {pages.map(p => (
-          <option key={p.id} value={p.id}>{p.name}</option>
-        ))}
-      </select>
-      <button onClick={savePage} disabled={!selectedPageToken}>Save Page</button>
-      {saved && <Composer pageId={selected} />}
+    <div className="fb-shell">
+      <div className="fb-card">
+        <h1 className="fb-title">Select Page</h1>
+        <div className="fb-field">
+          <label className="fb-label">Page</label>
+          <select className="fb-select" value={selected} onChange={(e) => {
+            setSelected(e.target.value)
+            const p = pages.find(pp => pp.id === e.target.value)
+            setPageName(p?.name || '')
+          }}>
+            {pages.map(p => (
+              <option key={p.id} value={p.id}>{p.name}</option>
+            ))}
+          </select>
+        </div>
+        <button className="fb-btn fb-btn-primary" onClick={savePage} disabled={!selectedPageToken}>Save Page</button>
+        {saved && <Composer pageId={selected} />}
+      </div>
     </div>
   )
 }
@@ -111,27 +121,30 @@ function Composer({ pageId }) {
   }
 
   return (
-    <div style={{ marginTop: 20 }}>
-      <h3>Create Post</h3>
-      <textarea
-        placeholder="Message"
-        value={message}
-        onChange={(e) => setMessage(e.target.value)}
-        rows={4}
-        style={{ width: '100%' }}
-      />
-      <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-        <button onClick={postText} disabled={!message}>Post Text</button>
+    <div className="fb-composer">
+      <h2 className="fb-section-title">Create Post</h2>
+      <div className="fb-field">
+        <label className="fb-label">Message</label>
+        <textarea
+          className="fb-textarea"
+          placeholder="Write something..."
+          value={message}
+          onChange={(e) => setMessage(e.target.value)}
+          rows={4}
+        />
+      </div>
+      <div className="fb-row">
+        <button className="fb-btn fb-btn-primary" onClick={postText} disabled={!message}>Post Text</button>
         <input
+          className="fb-input"
           placeholder="Image URL (optional)"
           value={imageUrl}
           onChange={(e) => setImageUrl(e.target.value)}
-          style={{ flex: 1 }}
         />
-        <button onClick={postPhoto} disabled={!imageUrl}>Post Photo</button>
+        <button className="fb-btn" onClick={postPhoto} disabled={!imageUrl}>Post Photo</button>
       </div>
       {result && (
-        <pre style={{ marginTop: 12 }}>{result}</pre>
+        <pre className="fb-result">{result}</pre>
       )}
     </div>
   )

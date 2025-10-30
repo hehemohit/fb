@@ -29,9 +29,20 @@ npm run dev
 - POST /api/post/text
 - POST /api/post/photo
 
+### Instagram (requires IG Business/Creator linked to the Page)
+- GET /api/ig/account?pagesId=... → returns `{ igUserId, username }`
+- POST /api/ig/photo { pageId, imageUrl, caption }
+- POST /api/ig/video { pageId, videoUrl, caption, shareToFeed }
+
 CORS is configured for http://localhost:5173.
 
 ## Notes
 
 - Use PAGE access tokens for Page posts.
 - Do not expose PAGE tokens to the frontend.
+ 
+### Instagram Requirements
+- Instagram account must be Business or Creator.
+- It must be linked to the Facebook Page in Page settings.
+- App permissions (during login/App Review): `instagram_basic`, `instagram_content_publish`, `pages_show_list`.
+- Publishing flow: create container via `/{ig-user-id}/media` then publish with `/{ig-user-id}/media_publish`.
