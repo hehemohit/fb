@@ -5,6 +5,9 @@ const mongoose = require('mongoose');
 const cors = require('cors');
 const cookieParser = require('cookie-parser');
 const jwt = require('jsonwebtoken');
+const multer = require('multer');
+const FormData = require('form-data');
+const upload = multer({ storage: multer.memoryStorage() });
 const PageToken = require('./models/PageToken');
 
 const app = express();
@@ -123,13 +126,20 @@ app.post('/api/pages/save', async (req, res) => {
 // Create a text/link post: POST /{page-id}/feed
 app.post('/api/post/text', async (req, res) => {
   try {
-    const { pageId, message, link } = req.body || {};
+    const { pageId, message, link, scheduledPublishTime, publishNow } = req.body || {};
     if (!pageId || !message) return res.status(400).json({ error: 'Missing data' });
     const page = await PageToken.findOne({ pageId });
     if (!page) return res.status(404).json({ error: 'Page not saved' });
 
     const params = { message, access_token: page.accessToken };
     if (link) params.link = link;
+    // Scheduling: if scheduledPublishTime provided, create an unpublished scheduled post
+    if (scheduledPublishTime) {
+      params.published = false;
+      params.scheduled_publish_time = Number(scheduledPublishTime);
+    } else if (publishNow === false) {
+      params.published = false;
+    }
 
     const fbResp = await axios.post(
       `https://graph.facebook.com/v20.0/${pageId}/feed`,
@@ -147,7 +157,7 @@ app.post('/api/post/text', async (req, res) => {
 // Create a photo post: POST /{page-id}/photos
 app.post('/api/post/photo', async (req, res) => {
   try {
-    const { pageId, message, imageUrl } = req.body || {};
+    const { pageId, message, imageUrl, altText, scheduledPublishTime, publishNow } = req.body || {};
     if (!pageId || !imageUrl) return res.status(400).json({ error: 'Missing data' });
     const page = await PageToken.findOne({ pageId });
     if (!page) return res.status(404).json({ error: 'Page not saved' });
@@ -158,6 +168,13 @@ app.post('/api/post/photo', async (req, res) => {
       access_token: page.accessToken,
       published: true,
     };
+    if (altText) params.alt_text_custom = altText;
+    if (scheduledPublishTime) {
+      params.published = false;
+      params.scheduled_publish_time = Number(scheduledPublishTime);
+    } else if (publishNow === false) {
+      params.published = false;
+    }
     const fbResp = await axios.post(
       `https://graph.facebook.com/v20.0/${pageId}/photos`,
       null,
@@ -171,6 +188,219 @@ app.post('/api/post/photo', async (req, res) => {
   }
 });
 
+// Upload a local image file and post as photo (multipart)
+app.post('/api/post/photo-upload', upload.single('file'), async (req, res) => {
+  try {
+    const { pageId, message } = req.body || {};
+    const file = req.file;
+    if (!pageId || !file) return res.status(400).json({ error: 'Missing pageId or file' });
+    const page = await PageToken.findOne({ pageId });
+    if (!page) return res.status(404).json({ error: 'Page not saved' });
+
+    const form = new FormData();
+    form.append('caption', message || '');
+    form.append('access_token', page.accessToken);
+    form.append('published', 'true');
+    form.append('source', file.buffer, { filename: file.originalname, contentType: file.mimetype });
+
+    const fbResp = await axios.post(`https://graph.facebook.com/v20.0/${pageId}/photos`, form, {
+      headers: form.getHeaders(),
+      maxContentLength: Infinity,
+      maxBodyLength: Infinity,
+    });
+    res.json(fbResp.data);
+  } catch (e) {
+    const err = e.response?.data || e.message;
+    console.error('Photo upload error:', err);
+    res.status(400).json({ error: err });
+  }
+});
+
+// Compose: post message with multiple images (URLs and/or uploaded files) in one post
+app.post('/api/post/compose', upload.array('files'), async (req, res) => {
+  try {
+    const { pageId } = req.body || {};
+    let { message, imageUrls } = req.body || {};
+    const files = req.files || [];
+    if (!pageId) return res.status(400).json({ error: 'Missing pageId' });
+    const page = await PageToken.findOne({ pageId });
+    if (!page) return res.status(404).json({ error: 'Page not saved' });
+
+    if (typeof imageUrls === 'string') {
+      try { imageUrls = JSON.parse(imageUrls || '[]'); } catch { imageUrls = []; }
+    }
+    if (!Array.isArray(imageUrls)) imageUrls = [];
+
+    const mediaIds = [];
+
+    // 1) Upload URL images as unpublished to get media_fbid
+    if (imageUrls.length) {
+      const urlUploads = await Promise.all(
+        imageUrls.map((u) =>
+          axios.post(`https://graph.facebook.com/v20.0/${pageId}/photos`, null, {
+            params: { url: u, published: false, access_token: page.accessToken },
+          })
+        )
+      );
+      urlUploads.forEach((r) => mediaIds.push(r.data.id));
+    }
+
+    // 2) Upload local files as unpublished to get media_fbid
+    for (const file of files) {
+      const form = new FormData();
+      form.append('published', 'false');
+      form.append('access_token', page.accessToken);
+      form.append('source', file.buffer, { filename: file.originalname, contentType: file.mimetype });
+      const up = await axios.post(`https://graph.facebook.com/v20.0/${pageId}/photos`, form, { headers: form.getHeaders() });
+      mediaIds.push(up.data.id);
+    }
+
+    if (mediaIds.length === 0 && !message) {
+      return res.status(400).json({ error: 'Nothing to post' });
+    }
+
+    // 3) Create feed post with attached_media
+    const attached_media = mediaIds.map((id) => ({ media_fbid: id }));
+    const fbResp = await axios.post(`https://graph.facebook.com/v20.0/${pageId}/feed`, null, {
+      params: { message: message || '', attached_media, access_token: page.accessToken },
+    });
+    res.json(fbResp.data);
+  } catch (e) {
+    const err = e.response?.data || e.message;
+    console.error('Compose post error:', err);
+    res.status(400).json({ error: err });
+  }
+});
+
+// Create a multi-photo post by attaching multiple media
+app.post('/api/post/photos-multi', async (req, res) => {
+  try {
+    const { pageId, message, imageUrls = [] } = req.body || {};
+    if (!pageId || !Array.isArray(imageUrls) || imageUrls.length === 0) {
+      return res.status(400).json({ error: 'Missing imageUrls' });
+    }
+    const page = await PageToken.findOne({ pageId });
+    if (!page) return res.status(404).json({ error: 'Page not saved' });
+
+    // Upload each photo as unpublished to get media_fbid
+    const uploadPromises = imageUrls.map((u) =>
+      axios.post(`https://graph.facebook.com/v20.0/${pageId}/photos`, null, {
+        params: { url: u, published: false, access_token: page.accessToken },
+      })
+    );
+    const uploads = await Promise.all(uploadPromises);
+    const attached_media = uploads.map((r) => ({ media_fbid: r.data.id }));
+
+    const fbResp = await axios.post(`https://graph.facebook.com/v20.0/${pageId}/feed`, null, {
+      params: {
+        message: message || '',
+        attached_media,
+        access_token: page.accessToken,
+      },
+    });
+    res.json(fbResp.data);
+  } catch (e) {
+    const err = e.response?.data || e.message;
+    console.error('Multi-photo post error:', err);
+    res.status(400).json({ error: err });
+  }
+});
+
+// Create a video post from a public video file URL
+app.post('/api/post/video', async (req, res) => {
+  try {
+    const { pageId, fileUrl, title, description, published = true, scheduledPublishTime } = req.body || {};
+    if (!pageId || !fileUrl) return res.status(400).json({ error: 'Missing data' });
+    const page = await PageToken.findOne({ pageId });
+    if (!page) return res.status(404).json({ error: 'Page not saved' });
+
+    const params = {
+      file_url: fileUrl,
+      title: title || undefined,
+      description: description || undefined,
+      access_token: page.accessToken,
+      published: Boolean(published),
+    };
+    if (scheduledPublishTime) {
+      params.published = false;
+      params.scheduled_publish_time = Number(scheduledPublishTime);
+    }
+    const fbResp = await axios.post(`https://graph.facebook.com/v20.0/${pageId}/videos`, null, { params });
+    res.json(fbResp.data);
+  } catch (e) {
+    const err = e.response?.data || e.message;
+    console.error('Video post error:', err);
+    res.status(400).json({ error: err });
+  }
+});
+
+// List recent posts to enable edit/delete
+app.get('/api/posts', async (req, res) => {
+  try {
+    const { pageId, limit = 10 } = req.query || {};
+    if (!pageId) return res.status(400).json({ error: 'Missing pageId' });
+    const page = await PageToken.findOne({ pageId });
+    if (!page) return res.status(404).json({ error: 'Page not saved' });
+    const fbResp = await axios.get(`https://graph.facebook.com/v20.0/${pageId}/posts`, {
+      params: {
+        fields: 'id,message,created_time,permalink_url,is_hidden,attachments{media_type,media,url}',
+        limit: Number(limit),
+        access_token: page.accessToken,
+      },
+    });
+    res.json(fbResp.data);
+  } catch (e) {
+    res.status(400).json({ error: e.response?.data || e.message });
+  }
+});
+
+// Edit a post's message
+app.post('/api/post/edit', async (req, res) => {
+  try {
+    const { pageId, postId, message } = req.body || {};
+    if (!pageId || !postId || !message) return res.status(400).json({ error: 'Missing data' });
+    const page = await PageToken.findOne({ pageId });
+    if (!page) return res.status(404).json({ error: 'Page not saved' });
+    const fbResp = await axios.post(`https://graph.facebook.com/v20.0/${postId}`, null, {
+      params: { message, access_token: page.accessToken },
+    });
+    res.json(fbResp.data);
+  } catch (e) {
+    res.status(400).json({ error: e.response?.data || e.message });
+  }
+});
+
+// Hide/unhide a post
+app.post('/api/post/hide', async (req, res) => {
+  try {
+    const { pageId, postId, isHidden } = req.body || {};
+    if (!pageId || !postId) return res.status(400).json({ error: 'Missing data' });
+    const page = await PageToken.findOne({ pageId });
+    if (!page) return res.status(404).json({ error: 'Page not saved' });
+    const fbResp = await axios.post(`https://graph.facebook.com/v20.0/${postId}`, null, {
+      params: { is_hidden: Boolean(isHidden), access_token: page.accessToken },
+    });
+    res.json(fbResp.data);
+  } catch (e) {
+    res.status(400).json({ error: e.response?.data || e.message });
+  }
+});
+
+// Delete a post
+app.delete('/api/post', async (req, res) => {
+  try {
+    const { pageId, postId } = req.query || {};
+    if (!pageId || !postId) return res.status(400).json({ error: 'Missing data' });
+    const page = await PageToken.findOne({ pageId });
+    if (!page) return res.status(404).json({ error: 'Page not saved' });
+    const fbResp = await axios.delete(`https://graph.facebook.com/v20.0/${postId}`, {
+      params: { access_token: page.accessToken },
+    });
+    res.json(fbResp.data);
+  } catch (e) {
+    res.status(400).json({ error: e.response?.data || e.message });
+  }
+});
 // Instagram: get IG user id linked to a Page
 app.get('/api/ig/account', async (req, res) => {
   try {
