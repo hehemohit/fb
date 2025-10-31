@@ -9,8 +9,9 @@ PORT=4000
 MONGO_URI=mongodb://localhost:27017/mern_facebook
 FB_APP_ID=YOUR_APP_ID
 FB_APP_SECRET=YOUR_APP_SECRET
-FB_REDIRECT_URI=http://localhost:4000/auth/facebook/callback
+FB_REDIRECT_URI=https://fb-gsoz.onrender.com/auth/facebook/callback
 JWT_SECRET=replace_with_strong_secret
+FRONTEND_URL=https://fb-kappa-three.vercel.app
 `
 
 Start MongoDB, then:
@@ -42,7 +43,7 @@ npm run dev
 - POST /api/ig/photo { pageId, imageUrl, caption }
 - POST /api/ig/video { pageId, videoUrl, caption, shareToFeed }
 
-CORS is configured for http://localhost:5173.
+CORS is configured for http://localhost:5173, https://fb-kappa-three.vercel.app, and https://fb-gsoz.onrender.com.
 
 ## Notes
 

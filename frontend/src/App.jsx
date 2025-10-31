@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import './App.css'
 
-const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:4000'
+const API_BASE = import.meta.env.VITE_API_BASE || 'https://fb-gsoz.onrender.com'
 
 function Home() {
   const handleConnect = () => {
@@ -421,7 +421,7 @@ function PageActions() {
 }
 
 function Insights() {
-  const API_BASE = 'http://localhost:4000'
+  const API_BASE = import.meta.env.VITE_API_BASE || 'https://fb-gsoz.onrender.com'
   const urlParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : new URLSearchParams()
   const initialPageId = urlParams.get('pageId') || ''
   const [pageId, setPageId] = useState(initialPageId)

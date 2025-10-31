@@ -13,7 +13,8 @@ const PageToken = require('./models/PageToken');
 const app = express();
 const allowedOrigins = [
   'http://localhost:5173',
-  'https://fb-kappa-three.vercel.app'
+  'https://fb-kappa-three.vercel.app',
+  'https://fb-gsoz.onrender.com'
 ];
 app.use(cors({ 
   origin: function (origin, callback) {
