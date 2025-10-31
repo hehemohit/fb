@@ -29,6 +29,14 @@ npm run dev
 - POST /api/post/text
 - POST /api/post/photo
 
+### Insights
+- GET /api/insights/page?pageId=...&since=YYYY-MM-DD&until=YYYY-MM-DD&metrics=csv&period=day|week|days_28|lifetime
+  - defaults: metrics=`page_impressions,page_impressions_unique,page_engaged_users,page_content_activity,page_fans,page_views_total`, period=`day`
+- GET /api/insights/posts?pageId=...&limit=10&metrics=csv&after=...&before=...
+  - defaults: metrics=`post_impressions,post_impressions_unique,post_engaged_users,post_clicks,post_reactions_by_type_total`
+- GET /api/insights/post?postId=...&pageId=...&metrics=csv
+  - defaults: metrics=`post_impressions,post_impressions_unique,post_engaged_users,post_clicks,post_reactions_by_type_total,post_video_views`
+
 ### Instagram (requires IG Business/Creator linked to the Page)
 - GET /api/ig/account?pagesId=... → returns `{ igUserId, username }`
 - POST /api/ig/photo { pageId, imageUrl, caption }

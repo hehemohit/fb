@@ -25,7 +25,6 @@ function SelectPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [selected, setSelected] = useState('')
-  const [saved, setSaved] = useState(false)
   const [pageName, setPageName] = useState('')
 
   useEffect(() => {
@@ -66,7 +65,9 @@ function SelectPage() {
       credentials: 'include',
       body: JSON.stringify(body),
     })
-    if (res.ok) setSaved(true)
+    if (res.ok) {
+      window.location.href = `/page-actions?pageId=${encodeURIComponent(selected)}`
+    }
   }
 
   if (loading) return <div className="fb-shell"><div className="fb-card"><p>Loading pages…</p></div></div>
@@ -89,7 +90,6 @@ function SelectPage() {
           </select>
         </div>
         <button className="fb-btn fb-btn-primary" onClick={savePage} disabled={!selectedPageToken}>Save Page</button>
-        {saved && <Composer pageId={selected} />}
       </div>
     </div>
   )
@@ -371,9 +371,178 @@ function Composer({ pageId }) {
   )
 }
 
+function CreatePost() {
+  const params = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : new URLSearchParams()
+  const pageId = params.get('pageId') || ''
+  if (!pageId) {
+    return (
+      <div className="fb-shell">
+        <div className="fb-card">
+          <p className="fb-error">Missing pageId. Please select a page first.</p>
+          <a className="fb-btn fb-btn-primary" href="/select-page">Go to Select Page</a>
+        </div>
+      </div>
+    )
+  }
+  return (
+    <div className="fb-shell">
+      <div className="fb-card">
+        <h1 className="fb-title">Create Post</h1>
+        <Composer pageId={pageId} />
+      </div>
+    </div>
+  )
+}
+
+function PageActions() {
+  const params = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : new URLSearchParams()
+  const pageId = params.get('pageId') || ''
+  if (!pageId) {
+    return (
+      <div className="fb-shell">
+        <div className="fb-card">
+          <p className="fb-error">Missing pageId. Please select a page first.</p>
+          <a className="fb-btn fb-btn-primary" href="/select-page">Go to Select Page</a>
+        </div>
+      </div>
+    )
+  }
+  return (
+    <div className="fb-shell">
+      <div className="fb-card">
+        <h1 className="fb-title">Page Actions</h1>
+        <div className="fb-row" style={{ gap: 12 }}>
+          <a className="fb-btn fb-btn-primary" href={`/create-post?pageId=${encodeURIComponent(pageId)}`}>Create Post</a>
+          <a className="fb-btn" href={`/insights?pageId=${encodeURIComponent(pageId)}`}>Insights</a>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function Insights() {
+  const API_BASE = 'http://localhost:4000'
+  const urlParams = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : new URLSearchParams()
+  const initialPageId = urlParams.get('pageId') || ''
+  const [pageId, setPageId] = useState(initialPageId)
+  const [metrics, setMetrics] = useState('page_impressions,page_impressions_unique,page_engaged_users,page_content_activity,page_views_total')
+  const [period, setPeriod] = useState('day')
+  const [since, setSince] = useState('')
+  const [until, setUntil] = useState('')
+  const [pageInsights, setPageInsights] = useState([])
+  const [posts, setPosts] = useState([])
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+  const [raw, setRaw] = useState(null)
+
+  const fetchPageInsights = async () => {
+    setLoading(true); setError('')
+    try {
+      const qs = new URLSearchParams({ pageId })
+      if (metrics) qs.set('metrics', metrics)
+      if (period) qs.set('period', period)
+      if (since) qs.set('since', since)
+      if (until) qs.set('until', until)
+      const r1 = await fetch(`${API_BASE}/api/insights/page?${qs.toString()}`)
+      const d1 = await r1.json()
+      setPageInsights(d1.data || [])
+      const r2 = await fetch(`${API_BASE}/api/insights/posts?pageId=${encodeURIComponent(pageId)}&limit=10&metrics=post_impressions,post_impressions_unique,post_engaged_users,post_clicks,post_reactions_by_type_total`)
+      const d2 = await r2.json()
+      setPosts(d2.data || [])
+      setRaw({ page: d1, posts: d2 })
+    } catch (e) {
+      setError(String(e.message || e))
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div className="fb-shell">
+      <div className="fb-card">
+        <h1 className="fb-title">Insights</h1>
+        <div className="fb-row">
+          <input className="fb-input" placeholder="Page ID" value={pageId} onChange={(e) => setPageId(e.target.value)} />
+          <input className="fb-input" placeholder="Metrics (comma-separated)" value={metrics} onChange={(e) => setMetrics(e.target.value)} />
+          <select className="fb-select" value={period} onChange={(e) => setPeriod(e.target.value)}>
+            <option value="day">day</option>
+            <option value="week">week</option>
+            <option value="days_28">days_28</option>
+            <option value="lifetime">lifetime</option>
+          </select>
+          <input className="fb-input" type="date" value={since} onChange={(e) => setSince(e.target.value)} />
+          <input className="fb-input" type="date" value={until} onChange={(e) => setUntil(e.target.value)} />
+          <button className="fb-btn fb-btn-primary" onClick={fetchPageInsights} disabled={!pageId}>Load</button>
+        </div>
+
+        {loading && <p>Loading…</p>}
+        {error && <p className="fb-error">{error}</p>}
+
+        {pageInsights.length > 0 && (
+          <div className="fb-result">
+            {pageInsights.map((m) => (
+              <div key={m.name} style={{ marginBottom: 8 }}>
+                <strong>{m.title || m.name}</strong>
+                <div style={{ fontSize: 12, color: '#666' }}>{m.description}</div>
+                <div style={{ marginTop: 4 }}>
+                  {m.values?.slice(-7).map((v, i) => (
+                    <span key={i} style={{ marginRight: 8 }}>{typeof v.value === 'object' ? JSON.stringify(v.value) : v.value}</span>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {posts.length > 0 && (
+          <div className="fb-result">
+            <h3 className="fb-section-title">Recent Posts</h3>
+            {posts.map((p) => {
+              const toVal = (arr, name) => (arr.find(x => x.name === name)?.values?.[0]?.value)
+              const reactions = toVal(p.insights, 'post_reactions_by_type_total') || 0
+              const impressions = toVal(p.insights, 'post_impressions') || 0
+              const uniqueImpr = toVal(p.insights, 'post_impressions_unique') || 0
+              const engaged = toVal(p.insights, 'post_engaged_users') || 0
+              const clicks = toVal(p.insights, 'post_clicks') || 0
+              const reactionsTotal = typeof reactions === 'object' ? Object.values(reactions).reduce((a, b) => a + b, 0) : reactions
+              return (
+                <div key={p.id} className="fb-result">
+                  <div><strong>{(p.message || '').slice(0, 80) || '(no message)'}</strong></div>
+                  <div style={{ fontSize: 12 }}>
+                    {new Date(p.created_time).toLocaleString()} · <a href={p.permalink_url} target="_blank" rel="noreferrer">Open</a>
+                  </div>
+                  <div style={{ marginTop: 6, display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+                    <span>Impr: {impressions}</span>
+                    <span>Unique: {uniqueImpr}</span>
+                    <span>Engaged: {engaged}</span>
+                    <span>Clicks: {clicks}</span>
+                    <span>Reactions: {reactionsTotal}</span>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
+
+        {raw && (
+          <div className="fb-result">
+            <details>
+              <summary>Raw response</summary>
+              <pre className="fb-result" style={{ whiteSpace: 'pre-wrap' }}>{JSON.stringify(raw, null, 2)}</pre>
+            </details>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 function App() {
   const path = typeof window !== 'undefined' ? window.location.pathname : '/'
   if (path === '/select-page') return <SelectPage />
+  if (path === '/insights') return <Insights />
+  if (path === '/create-post') return <CreatePost />
+  if (path === '/page-actions') return <PageActions />
   return <Home />
 }
 

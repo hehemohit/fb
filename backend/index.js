@@ -565,6 +565,131 @@ app.post('/api/ig/video', async (req, res) => {
   }
 });
 
+// Page-level insights summary
+app.get('/api/insights/page', async (req, res) => {
+  try {
+    const { pageId, since, until, metrics, period } = req.query || {};
+    if (!pageId) return res.status(400).json({ error: 'Missing pageId' });
+    const page = await PageToken.findOne({ pageId });
+    if (!page) return res.status(404).json({ error: 'Page not saved' });
+
+    const lifetimeOnly = new Set([
+      'page_fans',
+      'page_fans_city',
+      'page_fans_locale',
+      'page_fans_gender_age',
+    ]);
+    const defaultPeriod = period || 'day';
+    // Choose safe defaults for the requested period
+    const defaultMetrics = defaultPeriod === 'lifetime'
+      ? ['page_fans'].join(',')
+      : [
+          'page_impressions',
+          'page_impressions_unique',
+          'page_engaged_users',
+          'page_content_activity',
+          'page_views_total',
+        ].join(',');
+
+    const params = {
+      metric: (metrics || defaultMetrics)
+        .split(',')
+        .map((m) => m.trim())
+        .filter((m) => m)
+        // Remove lifetime-only metrics when not querying lifetime
+        .filter((m) => (defaultPeriod === 'lifetime' ? true : !lifetimeOnly.has(m)))
+        .join(','),
+      access_token: page.accessToken,
+      period: defaultPeriod,
+    };
+    if (since) params.since = since;
+    if (until) params.until = until;
+
+    const resp = await axios.get(`https://graph.facebook.com/v20.0/${pageId}/insights`, { params });
+    res.json(resp.data);
+  } catch (e) {
+    res.status(400).json({ error: e.response?.data || e.message });
+  }
+});
+
+// Recent posts + per-post key insights
+app.get('/api/insights/posts', async (req, res) => {
+  try {
+    const { pageId, limit = 10, metrics, after, before } = req.query || {};
+    if (!pageId) return res.status(400).json({ error: 'Missing pageId' });
+    const page = await PageToken.findOne({ pageId });
+    if (!page) return res.status(404).json({ error: 'Page not saved' });
+
+    const postsResp = await axios.get(`https://graph.facebook.com/v20.0/${pageId}/posts`, {
+      params: {
+        fields: 'id,message,created_time,permalink_url',
+        limit: Number(limit),
+        access_token: page.accessToken,
+        after: after || undefined,
+        before: before || undefined,
+      },
+    });
+    const posts = postsResp.data?.data || [];
+    const paging = postsResp.data?.paging || null;
+    if (!posts.length) return res.json({ data: [] });
+
+    const defaultMetrics = [
+      'post_impressions',
+      'post_impressions_unique',
+      'post_engaged_users',
+      'post_clicks',
+      'post_reactions_by_type_total',
+    ].join(',');
+
+    const insightsAll = await Promise.all(
+      posts.map((p) =>
+        axios
+          .get(`https://graph.facebook.com/v20.0/${p.id}/insights`, {
+            params: { metric: metrics || defaultMetrics, access_token: page.accessToken },
+          })
+          .then((r) => ({ id: p.id, insights: r.data?.data || [] }))
+          .catch(() => ({ id: p.id, insights: [] }))
+      )
+    );
+
+    const map = new Map(insightsAll.map((x) => [x.id, x.insights]));
+    const merged = posts.map((p) => ({
+      ...p,
+      insights: map.get(p.id) || [],
+    }));
+
+    res.json({ data: merged, paging });
+  } catch (e) {
+    res.status(400).json({ error: e.response?.data || e.message });
+  }
+});
+
+// Detailed insights for a single post
+app.get('/api/insights/post', async (req, res) => {
+  try {
+    const { pageId, postId, metrics } = req.query || {};
+    if (!pageId || !postId) return res.status(400).json({ error: 'Missing pageId or postId' });
+    const page = await PageToken.findOne({ pageId });
+    if (!page) return res.status(404).json({ error: 'Page not saved' });
+
+    const defaultMetrics = [
+      'post_impressions',
+      'post_impressions_unique',
+      'post_engaged_users',
+      'post_clicks',
+      'post_reactions_by_type_total',
+      'post_video_views',
+    ].join(',');
+
+    const resp = await axios.get(`https://graph.facebook.com/v20.0/${postId}/insights`, {
+      params: { metric: metrics || defaultMetrics, access_token: page.accessToken },
+    });
+    res.json(resp.data);
+  } catch (e) {
+    res.status(400).json({ error: e.response?.data || e.message });
+  }
+});
+
 // Start server
 const port = process.env.PORT || 4000;
 app.listen(port, () => console.log(`API on :${port}`));
