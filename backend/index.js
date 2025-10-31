@@ -11,7 +11,20 @@ const upload = multer({ storage: multer.memoryStorage() });
 const PageToken = require('./models/PageToken');
 
 const app = express();
-app.use(cors({ origin: 'http://localhost:5173', credentials: true }));
+const allowedOrigins = [
+  'http://localhost:5173',
+  'https://fb-kappa-three.vercel.app'
+];
+app.use(cors({ 
+  origin: function (origin, callback) {
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true 
+}));
 app.use(express.json());
 app.use(cookieParser());
 
@@ -95,7 +108,8 @@ app.get('/auth/facebook/callback', async (req, res) => {
     res.cookie('session', jwtToken, { httpOnly: true, sameSite: 'lax' });
 
     // Redirect frontend to page selection UI
-    res.redirect('http://localhost:5173/select-page');
+    const frontendUrl = process.env.FRONTEND_URL || 'https://fb-kappa-three.vercel.app';
+    res.redirect(`${frontendUrl}/select-page`);
   } catch (e) {
     const err = e.response?.data || e.message;
     console.error('OAuth callback error:', err);
